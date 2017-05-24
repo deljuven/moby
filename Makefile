@@ -13,6 +13,11 @@ DOCKERFILE := $(shell bash -c 'source hack/make/.detect-daemon-osarch && echo $$
 DOCKER_GITCOMMIT := $(shell git rev-parse --short HEAD || echo unsupported)
 export DOCKER_GITCOMMIT
 
+# init docker_cli_path
+ifneq ("$(wildcard './cli_env.sh')","")
+DOCKER_CLI_PATH := $(shell bash -c 'source ./cli_env.sh && echo $${DOCKER_CLI_PATH}')
+endif
+
 # env vars passed through directly to Docker's build scripts
 # to allow things like `make KEEPBUNDLE=1 binary` easily
 # `project/PACKAGERS.md` have some limited documentation of some of these
