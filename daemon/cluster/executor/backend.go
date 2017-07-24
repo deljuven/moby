@@ -58,4 +58,7 @@ type Backend interface {
 	LookupImage(name string) (*types.ImageInspect, error)
 	PluginManager() *plugin.Manager
 	PluginGetter() *plugin.Store
+	ImageList(ctx context.Context) ([]types.ImageSummary, error)
+	GetLayers(ctx context.Context, encodedAuth string) ([]string, error)
+	QueryLayersByImage(ctx context.Context, image string, encodedAuth string) ([]string, error)
 }

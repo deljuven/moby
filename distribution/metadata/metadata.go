@@ -19,6 +19,9 @@ type Store interface {
 	Set(namespace, key string, value []byte) error
 	// Delete removes data indexed by namespace and key.
 	Delete(namespace, key string) error
+
+	// List lists all keys by namespace
+	List(namespace string) ([]string, error)
 }
 
 // FSMetadataStore uses the filesystem to associate metadata with layer and
@@ -72,4 +75,34 @@ func (store *FSMetadataStore) Delete(namespace, key string) error {
 
 	path := store.path(namespace, key)
 	return os.Remove(path)
+}
+
+// List lists all files in the sub directories in the path of namespace
+func (store *FSMetadataStore) List(namespace string) ([]string, error) {
+	store.RLock()
+	defer store.RUnlock()
+
+	result := make([]string, 0)
+	var lastErr error = nil
+	paths := store.path(namespace, "")
+	total, err := ioutil.ReadDir(paths)
+	if err != nil {
+		return nil, err
+	}
+	for _, keys := range total {
+		if keys.IsDir() {
+			algor := keys.Name()
+			sub := store.path(namespace, algor)
+			digests, err := ioutil.ReadDir(sub)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			for _, key := range digests {
+				digest := algor + ":" + key.Name()
+				result = append(result, digest)
+			}
+		}
+	}
+	return result, lastErr
 }

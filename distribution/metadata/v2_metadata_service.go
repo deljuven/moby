@@ -20,6 +20,7 @@ type V2MetadataService interface {
 	Add(diffID layer.DiffID, metadata V2Metadata) error
 	TagAndAdd(diffID layer.DiffID, hmacKey []byte, metadata V2Metadata) error
 	Remove(metadata V2Metadata) error
+	List() ([]string, error)
 }
 
 // v2MetadataService implements V2MetadataService
@@ -238,4 +239,9 @@ func (serv *v2MetadataService) Remove(metadata V2Metadata) error {
 	}
 
 	return serv.store.Set(serv.diffIDNamespace(), serv.diffIDKey(diffID), jsonBytes)
+}
+
+// List lists all layer digest on the engine
+func (serv *v2MetadataService) List() ([]string, error) {
+	return serv.store.List(serv.digestNamespace())
 }

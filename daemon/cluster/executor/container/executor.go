@@ -193,3 +193,31 @@ func (sp sortedPlugins) Less(i, j int) bool {
 	}
 	return sp[i].Name < sp[j].Name
 }
+
+func (e *executor) ImageInspect(ctx context.Context, image string) (types.ImageInspect, error) {
+	img, err := e.backend.LookupImage(image)
+	if err != nil {
+		return types.ImageInspect{}, err
+	}
+	return *img, nil
+}
+
+func (e *executor) ImageList(ctx context.Context) ([]types.ImageSummary, error) {
+	images, err := e.backend.ImageList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return images, nil
+}
+
+func (e *executor) GetLayers(ctx context.Context, encodedAuth string) ([]string, error) {
+	return e.backend.GetLayers(ctx, encodedAuth)
+}
+
+func (e *executor) QueryLayersByImage(ctx context.Context, image, encodedAuth string) ([]string, error) {
+	layers, err := e.backend.QueryLayersByImage(ctx, image, encodedAuth)
+	if err != nil {
+		return nil, err
+	}
+	return layers, nil
+}

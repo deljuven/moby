@@ -64,6 +64,18 @@ func TestV2MetadataService(t *testing.T) {
 		}
 	}
 
+	lists, err := V2MetadataService.List()
+	expect := 2
+	if expect != len(lists) {
+		t.Fatalf("actual digest length is %v", len(lists))
+	}
+	if _, err := V2MetadataService.GetDiffID(digest.Digest("sha256:f0cd5ca10b07f35512fc2f1cbf9a6cefbdb5cba70ac6b0c9e5988f4497f71937")); err != nil {
+		t.Fatalf("error calling GetDiffID: %v", err)
+	}
+	if _, err := V2MetadataService.GetMetadata(layer.DiffID("sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4")); err != nil {
+		t.Fatalf("error calling GetMetadata: %v", err)
+	}
+
 	// Check the correct values are read back
 	for _, vec := range testVectors {
 		metadata, err := V2MetadataService.GetMetadata(vec.diffID)

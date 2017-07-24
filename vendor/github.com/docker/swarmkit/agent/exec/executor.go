@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"github.com/docker/docker/api/types"
 	"github.com/docker/swarmkit/api"
 	"golang.org/x/net/context"
 )
@@ -20,6 +21,18 @@ type Executor interface {
 	// SetNetworkBootstrapKeys passes the symmetric keys from the
 	// manager to the executor.
 	SetNetworkBootstrapKeys([]*api.EncryptionKey) error
+
+	// ImageInspect returns image info with the specified image
+	ImageInspect(ctx context.Context, image string) (types.ImageInspect, error)
+
+	// ImageList return all images on the underlying node
+	ImageList(ctx context.Context) ([]types.ImageSummary, error)
+
+	// GetLayers return all the layers digests on the node
+	GetLayers(ctx context.Context, encodedAuth string) ([]string, error)
+
+	// QueryLayersByImage return layer digests of specified image on the underlying node
+	QueryLayersByImage(ctx context.Context, image string, encodedAuth string) ([]string, error)
 }
 
 // SecretsProvider is implemented by objects that can store secrets, typically
