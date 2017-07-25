@@ -271,7 +271,7 @@ func (r *Orchestrator) IsRelatedService(service *api.Service) bool {
 // IsRelatedService returns true if the service should be governed by this orchestrator
 func (r *Orchestrator) getScaleDownPolicy(ctx context.Context, service *api.Service, required uint64) {
 	if r.scaleDownReq == nil {
-		log.G(ctx).Error("(*Orchestrator).getScaleDownPolicy is no longer running for chan not inited")
+		log.G(ctx).Info("(*Orchestrator).getScaleDownPolicy is no longer running for chan closed")
 		return
 	}
 	select {
@@ -289,7 +289,7 @@ func (r *Orchestrator) getScaleDownPolicy(ctx context.Context, service *api.Serv
 func (r *Orchestrator) HandleScaleDownResp(ctx context.Context) {
 	for {
 		if r.scaleDownResp == nil {
-			log.G(ctx).Error("(*Orchestrator).HandleScaleDownResp is no longer running for chan not inited")
+			log.G(ctx).Info("(*Orchestrator).HandleScaleDownResp is no longer running for chan closed")
 			return
 		}
 		select {
