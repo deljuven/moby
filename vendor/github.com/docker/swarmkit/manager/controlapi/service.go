@@ -12,6 +12,7 @@ import (
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/identity"
 	"github.com/docker/swarmkit/manager/constraint"
+	"github.com/docker/swarmkit/manager/scheduler"
 	"github.com/docker/swarmkit/manager/state/store"
 	"github.com/docker/swarmkit/protobuf/ptypes"
 	"github.com/docker/swarmkit/template"
@@ -301,8 +302,40 @@ func validateMode(s *api.ServiceSpec) error {
 	m := s.GetMode()
 	switch m.(type) {
 	case *api.ServiceSpec_Replicated:
-		if int64(m.(*api.ServiceSpec_Replicated).Replicated.Replicas) < 0 {
+		replicas := int64(m.(*api.ServiceSpec_Replicated).Replicated.Replicas)
+		if replicas < 0 {
 			return grpc.Errorf(codes.InvalidArgument, "Number of replicas must be non-negative")
+		}
+		// validate image-based preference
+		strategy := scheduler.None
+		if placement := s.Task.Placement; placement != nil {
+			if prefs := placement.Preferences; prefs != nil && len(prefs) > 0 {
+				for _, pref := range prefs {
+					if img := pref.GetImage(); img != nil {
+						switch strategy {
+						case scheduler.None:
+							strategy = scheduler.ImageBase
+							if int64(img.ReplicaDescriptor) < 1 {
+								return grpc.Errorf(codes.InvalidArgument, "Number of image replicas must be positive")
+							}
+							if img.ReplicaDescriptor > uint64(replicas) {
+								return grpc.Errorf(codes.InvalidArgument, "Number of replicas must be bigger than number of image replicas")
+							}
+						case scheduler.ImageBase:
+							return grpc.Errorf(codes.InvalidArgument, "Can not use multiple image-base strategy")
+						case scheduler.SpreadOver:
+							return grpc.Errorf(codes.InvalidArgument, "Can not combine image-base strategy and spreadOver strategy together")
+						}
+					} else if spread := pref.GetSpread(); spread != nil {
+						switch strategy {
+						case scheduler.None:
+							strategy = scheduler.SpreadOver
+						case scheduler.ImageBase:
+							return grpc.Errorf(codes.InvalidArgument, "Can not combine image-base strategy and spreadOver strategy together")
+						}
+					}
+				}
+			}
 		}
 	case *api.ServiceSpec_Global:
 	default:
@@ -508,6 +541,58 @@ func (s *Server) UpdateService(ctx context.Context, request *api.UpdateServiceRe
 	})
 	if service == nil {
 		return nil, grpc.Errorf(codes.NotFound, "service %s not found", request.ServiceID)
+	}
+
+	isPrefConflict := func(origin, replace *api.ServiceSpec) (bool, error) {
+		strategy := scheduler.None
+		previous := uint64(0)
+		if origin.Task.Placement != nil {
+			old := origin.Task.Placement.Preferences
+			for _, pref := range old {
+				img := pref.GetImage()
+				if img != nil {
+					strategy = scheduler.ImageBase
+					previous = img.ReplicaDescriptor
+					break
+				}
+				spread := pref.GetSpread()
+				if spread != nil {
+					strategy = scheduler.SpreadOver
+					break
+				}
+			}
+		}
+
+		if strategy == scheduler.None {
+			return false, nil
+		}
+
+		if replace.Task.Placement != nil {
+			newPrefs := replace.Task.Placement.Preferences
+			for _, pref := range newPrefs {
+				img := pref.GetImage()
+				if img != nil {
+					switch strategy {
+					case scheduler.SpreadOver:
+						return true, grpc.Errorf(codes.InvalidArgument, "Service %v cannot be updated for changing strategy between spread-over and image-based", request.ServiceID)
+					case scheduler.ImageBase:
+						if img.ReplicaDescriptor != previous {
+							return true, grpc.Errorf(codes.Unimplemented, "Service %v not supported to update its image-based replica", request.ServiceID)
+						}
+					}
+				}
+				spread := pref.GetSpread()
+				if spread != nil && strategy == scheduler.ImageBase {
+					return true, grpc.Errorf(codes.InvalidArgument, "Service %v cannot be updated for changing strategy between spread-over and image-based", request.ServiceID)
+				}
+			}
+		}
+
+		return false, nil
+	}
+
+	if ok, err := isPrefConflict(&service.Spec, request.Spec); ok {
+		return nil, grpc.Errorf(codes.InvalidArgument, "error occurs for %v", err)
 	}
 
 	if request.Spec.Endpoint != nil && !reflect.DeepEqual(request.Spec.Endpoint, service.Spec.Endpoint) {

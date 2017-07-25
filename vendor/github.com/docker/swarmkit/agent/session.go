@@ -9,6 +9,7 @@ import (
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/connectionbroker"
 	"github.com/docker/swarmkit/log"
+	"github.com/docker/swarmkit/manager/scheduler"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -97,6 +98,7 @@ func (s *session) run(ctx context.Context, delay time.Duration, description *api
 	go runctx(ctx, s.closed, s.errs, s.watch)
 	go runctx(ctx, s.closed, s.errs, s.listen)
 	go runctx(ctx, s.closed, s.errs, s.logSubscriptions)
+	go runctx(ctx, s.closed, s.errs, s.syncTick)
 
 	close(s.registered)
 }
@@ -410,4 +412,65 @@ func (s *session) close() error {
 	})
 
 	return nil
+}
+
+const (
+	syncInterval = 5 * time.Minute
+	syncTimeout  = 30 * time.Second
+)
+
+func (s *session) syncTick(ctx context.Context) error {
+	log.G(ctx).Debugf("(*session).syncTick for sync image or rootfs to manager")
+	client := api.NewDispatcherClient(s.conn.ClientConn)
+	// every 5 minute try to send out a sync
+	interval := time.NewTimer(syncInterval)
+	defer interval.Stop()
+
+	var fn func(context.Context) ([]string, []string, error)
+	switch scheduler.SupportFlag {
+	case scheduler.RootfsBased:
+		fn = s.agent.getRootfsUpdates
+	case scheduler.ImageBased:
+		fn = s.agent.getImagesUpdates
+	case scheduler.ServiceBased:
+		return nil
+	}
+
+	old := make(map[string]int)
+	for key, value := range s.agent.sentRootFs {
+		old[key] = value
+	}
+
+	for {
+		select {
+		case <-interval.C:
+			appends, removals, err := fn(ctx)
+			// if error occurs, retry
+			if err != nil || (appends == nil && removals == nil) {
+				s.agent.sentRootFs = old
+				interval.Reset(syncInterval)
+				continue
+			}
+			// timeout after 30 seconds
+			syncCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+			_, syncErr := client.RootFSSync(syncCtx, &api.RootFSSyncRequest{
+				SessionID: s.sessionID,
+				Appends:   appends,
+				Removals:  removals,
+			})
+			cancel()
+			if syncErr != nil {
+				if grpc.Code(syncErr) == codes.NotFound {
+					err = errNodeNotRegistered
+				}
+				s.agent.sentRootFs = old
+				return err
+			}
+			interval.Reset(syncInterval)
+		case <-s.closed:
+			return errSessionClosed
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }

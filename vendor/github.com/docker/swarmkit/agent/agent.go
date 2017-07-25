@@ -7,9 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/swarmkit/agent/exec"
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/log"
+	"github.com/docker/swarmkit/manager/scheduler"
 	"golang.org/x/net/context"
 )
 
@@ -44,6 +46,11 @@ type Agent struct {
 	stopOnce  sync.Once     // only allow stop to be called once
 	closed    chan struct{} // only closed in run
 	err       error         // read only after closed is closed
+
+	sentRootFs map[string]int // mark rootfs those has been sent
+
+	imageQueryReq  chan *scheduler.RootfsQueryReq
+	imageQueryResp chan *scheduler.RootfsQueryResp
 }
 
 // New returns a new agent, ready for task dispatch.
@@ -53,18 +60,27 @@ func New(config *Config) (*Agent, error) {
 	}
 
 	a := &Agent{
-		config:   config,
-		sessionq: make(chan sessionOperation),
-		started:  make(chan struct{}),
-		leaving:  make(chan struct{}),
-		left:     make(chan struct{}),
-		stopped:  make(chan struct{}),
-		closed:   make(chan struct{}),
-		ready:    make(chan struct{}),
+		config:     config,
+		sessionq:   make(chan sessionOperation),
+		started:    make(chan struct{}),
+		leaving:    make(chan struct{}),
+		left:       make(chan struct{}),
+		stopped:    make(chan struct{}),
+		closed:     make(chan struct{}),
+		ready:      make(chan struct{}),
+		sentRootFs: make(map[string]int),
 	}
 
 	a.worker = newWorker(config.DB, config.Executor, a)
 	return a, nil
+}
+
+// ImageQueryPrepare init chan for accepting image query
+func (a *Agent) ImageQueryPrepare(imageQueryReq chan *scheduler.RootfsQueryReq, imageQueryResp chan *scheduler.RootfsQueryResp) {
+	if scheduler.SupportFlag != scheduler.RootfsBased {
+		return
+	}
+	a.imageQueryReq, a.imageQueryResp = imageQueryReq, imageQueryResp
 }
 
 // Start begins execution of the agent in the provided context, if not already
@@ -213,6 +229,8 @@ func (a *Agent) run(ctx context.Context) {
 	defer reporter.Close()
 
 	a.worker.Listen(ctx, reporter)
+
+	go a.HandleImageQuery(ctx)
 
 	for {
 		select {
@@ -538,4 +556,139 @@ func nodesEqual(a, b *api.Node) bool {
 	a.Meta, b.Meta = api.Meta{}, api.Meta{}
 
 	return reflect.DeepEqual(a, b)
+}
+
+func (a *Agent) queryLayersByImage(ctx context.Context, image, encodedAuth string) ([]string, error) {
+	return a.config.Executor.QueryLayersByImage(ctx, image, encodedAuth)
+}
+
+// GetLayers return all the layers digests on the node
+func (a *Agent) GetLayers(ctx context.Context, encodedAuth string) ([]string, error) {
+	return a.config.Executor.GetLayers(ctx, encodedAuth)
+}
+
+// QueryLayersByImage return layer digests of specified image on the underlying node
+func (a *Agent) QueryLayersByImage(ctx context.Context, image string, encodedAuth string) ([]string, error) {
+	return a.config.Executor.QueryLayersByImage(ctx, image, encodedAuth)
+}
+
+// ImageList list all images on the node by agent
+func (a *Agent) ImageList(ctx context.Context) ([]types.ImageSummary, error) {
+	return a.config.Executor.ImageList(ctx)
+}
+
+func (a *Agent) getUpdates(candidates []string) (appends []string, removals []string) {
+	discarded := make(map[string]int)
+	for key, value := range a.sentRootFs {
+		discarded[key] = value
+	}
+	for _, candidate := range candidates {
+		if _, ok := a.sentRootFs[candidate]; !ok {
+			appends = append(appends, candidate)
+			a.sentRootFs[candidate] = 1
+		} else {
+			delete(discarded, candidate)
+		}
+	}
+
+	for removed := range discarded {
+		removals = append(removals, removed)
+		delete(a.sentRootFs, removed)
+	}
+	return
+}
+
+// HandleImageQuery resolve the queried image from chan and send the image's rootfs as the response
+func (a *Agent) HandleImageQuery(ctx context.Context) {
+	if scheduler.SupportFlag != scheduler.RootfsBased {
+		return
+	}
+
+	for {
+		if a.imageQueryReq == nil {
+			log.G(ctx).Error("(*Agent).HandleImageQuery is no longer running for chan not inited")
+			return
+		}
+		select {
+		case req, ok := <-a.imageQueryReq:
+			if !ok {
+				log.G(ctx).Error("(*Agent).HandleImageQuery is no longer running for chan is closed")
+				return
+			}
+			img, authConfig := req.Image, req.EncodedAuth
+			layers, err := a.queryLayersByImage(ctx, img, authConfig)
+			if err != nil {
+				log.G(ctx).Errorf("(*Agent).HandleImageQuery can't get image %v layers", img)
+				continue
+			}
+			go func() {
+				if a.imageQueryResp == nil {
+					log.G(ctx).Error("(*Agent).HandleImageQuery is no longer running for send chan not inited")
+					return
+				}
+				select {
+				case a.imageQueryResp <- &scheduler.RootfsQueryResp{
+					Image:  img,
+					Layers: layers,
+				}:
+				}
+			}()
+		case <-ctx.Done():
+			log.G(ctx).Errorf("(*Agent).HandleImageQuery failed cause: %v", ctx.Err())
+			return
+		}
+	}
+
+}
+
+// getImagesUpdates attempts to send image list update over the current session,
+// blocking until the operation is completed.
+// If an error is returned, the operation should be retried.
+func (a *Agent) getImagesUpdates(ctx context.Context) (appends []string, removals []string, _ error) {
+	log.G(ctx).Debug("(*Agent).getImagesUpdate")
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	imageList, err := a.ImageList(ctx)
+	if err != nil {
+		log.G(ctx).WithError(err).WithField("agent", a.config.Executor).WithField("node", a.node.ID).Error("agent: failed to get image list on node")
+		return nil, nil, err
+	}
+	images := make([]string, 0)
+	for _, img := range imageList {
+		images = append(images, img.ID)
+		images = append(images, img.RepoTags...)
+		images = append(images, img.RepoDigests...)
+	}
+	appends, removals = a.getUpdates(images)
+
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	default:
+		return appends, removals, nil
+	}
+}
+
+// getRootfsUpdates attempts to send rootfs changes update over the current session,
+// blocking until the operation is completed.
+// If an error is returned, the operation should be retried.
+func (a *Agent) getRootfsUpdates(ctx context.Context) (appends []string, removals []string, _ error) {
+	log.G(ctx).Debug("(*Agent).getRootfsUpdates")
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	layers, err := a.GetLayers(ctx, "")
+	if err != nil {
+		log.G(ctx).WithError(err).WithField("agent", a.config.Executor).WithField("node", a.node.ID).Error("agent: failed to get rootfs list on node")
+		return nil, nil, err
+	}
+	appends, removals = a.getUpdates(layers)
+
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	default:
+		return appends, removals, nil
+	}
 }

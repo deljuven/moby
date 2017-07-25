@@ -148,6 +148,14 @@ type Manager struct {
 	remoteListener  chan net.Listener
 	controlListener chan net.Listener
 	errServe        chan error
+
+	syncChan chan *scheduler.SyncMessage
+
+	imageQueryReq  chan *scheduler.RootfsQueryReq
+	imageQueryResp chan *scheduler.RootfsQueryResp
+
+	scaleDownReq  chan *scheduler.ScaleDownReq
+	scaleDownResp chan *scheduler.ScaleDownResp
 }
 
 type closeOnceListener struct {
@@ -161,6 +169,14 @@ func (l *closeOnceListener) Close() error {
 		err = l.Listener.Close()
 	})
 	return err
+}
+
+// ImageQueryPrepare init image query chan, shared with agent
+func (m *Manager) ImageQueryPrepare(imageQueryReq chan *scheduler.RootfsQueryReq, imageQueryResp chan *scheduler.RootfsQueryResp) {
+	if scheduler.SupportFlag != scheduler.RootfsBased {
+		return
+	}
+	m.imageQueryReq, m.imageQueryResp = imageQueryReq, imageQueryResp
 }
 
 // New creates a Manager which has not started to accept requests yet.
@@ -452,16 +468,16 @@ func (m *Manager) Run(parent context.Context) error {
 
 	// Everything registered on m.server should be an authenticated
 	// wrapper, or a proxy wrapping an authenticated wrapper!
-	api.RegisterCAServer(m.server, proxyCAAPI)
-	api.RegisterNodeCAServer(m.server, proxyNodeCAAPI)
-	api.RegisterRaftServer(m.server, authenticatedRaftAPI)
-	api.RegisterHealthServer(m.server, authenticatedHealthAPI)
-	api.RegisterRaftMembershipServer(m.server, proxyRaftMembershipAPI)
 	api.RegisterControlServer(m.server, authenticatedControlAPI)
 	api.RegisterLogsServer(m.server, authenticatedLogsServerAPI)
-	api.RegisterLogBrokerServer(m.server, proxyLogBrokerAPI)
-	api.RegisterResourceAllocatorServer(m.server, proxyResourceAPI)
+	api.RegisterHealthServer(m.server, authenticatedHealthAPI)
 	api.RegisterDispatcherServer(m.server, proxyDispatcherAPI)
+	api.RegisterCAServer(m.server, proxyCAAPI)
+	api.RegisterNodeCAServer(m.server, proxyNodeCAAPI)
+	api.RegisterResourceAllocatorServer(m.server, proxyResourceAPI)
+	api.RegisterLogBrokerServer(m.server, proxyLogBrokerAPI)
+	api.RegisterRaftServer(m.server, authenticatedRaftAPI)
+	api.RegisterRaftMembershipServer(m.server, proxyRaftMembershipAPI)
 	grpc_prometheus.Register(m.server)
 
 	api.RegisterControlServer(m.localserver, localProxyControlAPI)
@@ -619,6 +635,9 @@ func (m *Manager) Stop(ctx context.Context, clearData bool) {
 		<-srvDone
 	}
 
+	close(m.syncChan)
+	close(m.scaleDownReq)
+	close(m.scaleDownResp)
 	log.G(ctx).Info("Manager shut down")
 	// mutex is released and Run can return now
 }
@@ -910,6 +929,19 @@ func (m *Manager) becomeLeader(ctx context.Context) {
 	m.keyManager = keymanager.New(s, keymanager.DefaultConfig())
 	m.roleManager = newRoleManager(s, m.raftNode)
 
+	m.replicatedOrchestrator.ImageQueryPrepare(m.imageQueryReq)
+	m.scheduler.ImageQueryPrepare(m.imageQueryReq, m.imageQueryResp)
+
+	m.syncChan = make(chan *scheduler.SyncMessage)
+	m.scaleDownReq = make(chan *scheduler.ScaleDownReq)
+	m.scaleDownResp = make(chan *scheduler.ScaleDownResp)
+
+	m.scheduler.InitSyncChan(m.syncChan)
+	m.dispatcher.InitSyncChan(m.syncChan)
+
+	m.replicatedOrchestrator.InitScaleChan(m.scaleDownReq, m.scaleDownResp)
+	m.scheduler.InitScaleChan(m.scaleDownReq, m.scaleDownResp)
+
 	// TODO(stevvooe): Allocate a context that can be used to
 	// shutdown underlying manager processes when leadership is
 	// lost.
@@ -1022,6 +1054,16 @@ func (m *Manager) becomeFollower() {
 		m.keyManager.Stop()
 		m.keyManager = nil
 	}
+
+	close(m.syncChan)
+	close(m.scaleDownReq)
+	close(m.scaleDownResp)
+
+	m.scheduler.InitSyncChan(nil)
+	m.dispatcher.InitSyncChan(nil)
+
+	m.scheduler.InitScaleChan(nil, nil)
+	m.replicatedOrchestrator.InitScaleChan(nil, nil)
 }
 
 // defaultClusterObject creates a default cluster.

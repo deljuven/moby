@@ -32,7 +32,7 @@ type Executor interface {
 	GetLayers(ctx context.Context, encodedAuth string) ([]string, error)
 
 	// QueryLayersByImage return layer digests of specified image on the underlying node
-	QueryLayersByImage(ctx context.Context, image string, encodedAuth string) ([]string, error)
+	QueryLayersByImage(ctx context.Context, image, encodedAuth string) ([]string, error)
 }
 
 // SecretsProvider is implemented by objects that can store secrets, typically

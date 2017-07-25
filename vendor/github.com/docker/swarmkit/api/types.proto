@@ -706,9 +706,14 @@ message SpreadOver {
 	// spreading.
 }
 
+message ImageDependency {
+	uint64 replica_descriptor = 1; // replica descriptor, declaring at least how many different replica is needed
+}
+
 message PlacementPreference {
 	oneof Preference {
 		SpreadOver spread = 1;
+		ImageDependency image = 2;
 	}
 }
 
