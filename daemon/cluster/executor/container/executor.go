@@ -215,9 +215,5 @@ func (e *executor) GetLayers(ctx context.Context, encodedAuth string) ([]string,
 }
 
 func (e *executor) QueryLayersByImage(ctx context.Context, image, encodedAuth string) ([]string, error) {
-	layers, err := e.backend.QueryLayersByImage(ctx, image, encodedAuth)
-	if err != nil {
-		return nil, err
-	}
-	return layers, nil
+	return e.backend.QueryLayersByImage(ctx, image, encodedAuth)
 }
