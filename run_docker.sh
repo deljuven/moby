@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-dockerd -D --registry-mirror=http://dc3b238f.m.daocloud.io &
+dockerd -D --registry-mirror=http://hub-mirror.c.163.com &
