@@ -233,7 +233,7 @@ RUN ln -sv $PWD/contrib/completion/bash/docker /etc/bash_completion.d/docker
 # Add proxy
 ENV http_proxy 'http://10.0.2.2:1080'
 ENV https_proxy 'https://10.0.2.2:1080'
-ENV DOCKER_OPTS="--registry-mirror=http://dc3b238f.m.daocloud.io"
+ENV DOCKER_OPTS="--registry-mirror=http://hub-mirror.c.163.com/"
 
 # Get useful and necessary Hub images so we can "docker load" locally instead of pulling
 COPY contrib/download-frozen-image-v2.sh /go/src/github.com/docker/docker/contrib/
