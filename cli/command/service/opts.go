@@ -139,15 +139,32 @@ func (opts *placementPrefOpts) Set(value string) error {
 	if len(fields) != 2 {
 		return errors.New(`placement preference must be of the format "<strategy>=<arg>"`)
 	}
-	if fields[0] != "spread" {
-		return fmt.Errorf("unsupported placement preference %s (only spread is supported)", fields[0])
+	if fields[0] != "spread" && fields[0] != "image" {
+		return fmt.Errorf("unsupported placement preference %s (only spread or image is supported)", fields[0])
 	}
 
-	opts.prefs = append(opts.prefs, swarm.PlacementPreference{
-		Spread: &swarm.SpreadOver{
-			SpreadDescriptor: fields[1],
-		},
-	})
+	isSpread := true
+	if fields[0] == "image" {
+		isSpread = false
+	}
+
+	if isSpread {
+		opts.prefs = append(opts.prefs, swarm.PlacementPreference{
+			Spread: &swarm.SpreadOver{
+				SpreadDescriptor: fields[1],
+			},
+		})
+	} else {
+		replicas, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return fmt.Errorf("unsupported image preference value %s, only positive integers are accepted", fields[1])
+		}
+		opts.prefs = append(opts.prefs, swarm.PlacementPreference{
+			Image: &swarm.ImageDependency{
+				ReplicaDescriptor: uint64(replicas),
+			},
+		})
+	}
 	opts.strings = append(opts.strings, value)
 	return nil
 }

@@ -55,7 +55,7 @@ const (
 	ServiceBased OrderBase = 2
 
 	// SupportFlag indicates which order policy is taken
-	SupportFlag OrderBase = ServiceBased
+	SupportFlag OrderBase = RootfsBased
 )
 
 // SyncMessage used for sync image or rootfs changes from agent to scheduler by dispatcher

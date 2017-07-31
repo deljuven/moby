@@ -89,6 +89,7 @@ type Placement struct {
 // such as topology.
 type PlacementPreference struct {
 	Spread *SpreadOver
+	Image  *ImageDependency
 }
 
 // SpreadOver is a scheduling preference that instructs the scheduler to spread
@@ -96,6 +97,12 @@ type PlacementPreference struct {
 type SpreadOver struct {
 	// label descriptor, such as engine.labels.az
 	SpreadDescriptor string
+}
+
+// ImageDependency is a scheduling preference that instructs the scheduler to spread
+// tasks based on replica requirements.
+type ImageDependency struct {
+	ReplicaDescriptor uint64
 }
 
 // RestartPolicy represents the restart policy.
