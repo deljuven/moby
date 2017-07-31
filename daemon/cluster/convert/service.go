@@ -147,6 +147,14 @@ func ServiceSpecToGRPC(s types.ServiceSpec) (swarmapi.ServiceSpec, error) {
 						},
 					},
 				})
+			} else if pref.Image != nil {
+				preferences = append(preferences, &swarmapi.PlacementPreference{
+					Preference: &swarmapi.PlacementPreference_Image{
+						Image: &swarmapi.ImageDependency{
+							ReplicaDescriptor: pref.Image.ReplicaDescriptor,
+						},
+					},
+				})
 			}
 		}
 		spec.Task.Placement = &swarmapi.Placement{
