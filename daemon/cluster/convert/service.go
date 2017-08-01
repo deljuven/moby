@@ -350,6 +350,13 @@ func placementFromGRPC(p *swarmapi.Placement) *types.Placement {
 				},
 			})
 		}
+		if image := pref.GetImage(); image != nil {
+			r.Preferences = append(r.Preferences, types.PlacementPreference{
+				Image: &types.ImageDependency{
+					ReplicaDescriptor: image.ReplicaDescriptor,
+				},
+			})
+		}
 	}
 
 	return r
