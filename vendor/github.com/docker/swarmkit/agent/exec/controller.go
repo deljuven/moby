@@ -295,6 +295,7 @@ func Do(ctx context.Context, task *api.Task, ctlr Controller) (*api.TaskStatus, 
 			return fatal(err)
 		}
 
+		log.G(ctx).Infof("ALCLOG: task %v for service %v shutdown at %v", task.ID, task.ServiceID, time.Now())
 		return transition(api.TaskStateShutdown, "shutdown")
 	}
 
@@ -315,13 +316,14 @@ func Do(ctx context.Context, task *api.Task, ctlr Controller) (*api.TaskStatus, 
 			return fatal(err)
 		}
 
-		log.G(ctx).Infof("task %v for service %v started at %v", task.ID, task.ServiceID, time.Now())
+		log.G(ctx).Infof("ALCLOG: task %v for service %v started at %v", task.ID, task.ServiceID, time.Now())
 		return transition(api.TaskStateRunning, "started")
 	case api.TaskStateRunning:
 		if err := ctlr.Wait(ctx); err != nil {
 			return fatal(err)
 		}
 
+		log.G(ctx).Infof("ALCLOG: task %v for service %v completed at %v", task.ID, task.ServiceID, time.Now())
 		return transition(api.TaskStateCompleted, "finished")
 	}
 
